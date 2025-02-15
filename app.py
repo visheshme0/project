@@ -1,14 +1,18 @@
 import os
 import subprocess
 import json
-from flask import Flask, request, jsonify
 import requests
 import sqlite3
 from datetime import datetime
 import markdown
-import shutil
 from PIL import Image
 import pytesseract
+from flask import Flask, request, jsonify
+import shutil
+from bs4 import BeautifulSoup
+import pandas as pd
+import speech_recognition as sr
+import ffmpeg
 
 app = Flask(__name__)
 
@@ -16,6 +20,7 @@ app = Flask(__name__)
 def install_uv():
     try:
         subprocess.check_call([os.sys.executable, "-m", "pip", "install", "uv"])
+        return "uv installed successfully"
     except subprocess.CalledProcessError as e:
         return f"Error installing uv: {str(e)}"
 
@@ -143,25 +148,77 @@ def query_sales_db(input_db, output_file):
         f.write(str(total_sales))
 
     return "Gold ticket sales calculated successfully"
+
+# Additional B tasks
+def scrape_website(url, output_file):
+    try:
+        response = requests.get(url)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        data = soup.get_text()  # or extract specific data
+        with open(output_file, 'w') as f:
+            f.write(data)
+        return "Website data scraped successfully"
+    except Exception as e:
+        return f"Error scraping website: {str(e)}"
+
+def resize_image(input_file, output_file, size=(800, 600)):
+    try:
+        img = Image.open(input_file)
+        img = img.resize(size)
+        img.save(output_file)
+        return "Image resized successfully"
+    except Exception as e:
+        return f"Error resizing image: {str(e)}"
+
+def transcribe_audio(input_file, output_file):
+    try:
+        recognizer = sr.Recognizer()
+        with sr.AudioFile(input_file) as source:
+            audio = recognizer.record(source)
+        text = recognizer.recognize_google(audio)
+        with open(output_file, 'w') as f:
+            f.write(text)
+        return "Audio transcribed successfully"
+    except Exception as e:
+        return f"Error transcribing audio: {str(e)}"
+
+def markdown_to_html(input_file, output_file):
+    try:
+        with open(input_file, 'r') as f:
+            md_content = f.read()
+        html_content = markdown.markdown(md_content)
+        with open(output_file, 'w') as f:
+            f.write(html_content)
+        return "Markdown converted to HTML successfully"
+    except Exception as e:
+        return f"Error converting Markdown to HTML: {str(e)}"
+
+def filter_csv(input_file, output_file, column_name, value):
+    try:
+        df = pd.read_csv(input_file)
+        filtered_data = df[df[column_name] == value]
+        filtered_data.to_json(output_file, orient="records")
+        return "CSV filtered and converted to JSON successfully"
+    except Exception as e:
+        return f"Error filtering CSV: {str(e)}"
+
+# API Endpoints
 @app.route('/')
 def home():
     return 'Welcome to the Task Agent API!'
-# API Endpoints
+
 @app.route('/run', methods=['POST'])
 def run_task():
     task_description = request.args.get("task")
     try:
         if "Install uv" in task_description:
-            install_uv()
-            return jsonify(message="uv installed successfully"), 200
+            return jsonify(message=install_uv()), 200
         elif "run datagen.py" in task_description:
             user_email = task_description.split("${user.email}")[1].strip()
-            run_datagen(user_email)
-            return jsonify(message="Data generation successful"), 200
+            return jsonify(message=run_datagen(user_email)), 200
         elif "Format" in task_description:
             file_path = "/data/format.md"
-            format_file(file_path)
-            return jsonify(message="File formatted successfully"), 200
+            return jsonify(message=format_file(file_path)), 200
         elif "count Wednesdays" in task_description:
             count_wednesdays("/data/dates.txt", "/data/dates-wednesdays.txt")
             return jsonify(message="Wednesdays counted successfully"), 200
@@ -186,11 +243,26 @@ def run_task():
         elif "query ticket sales" in task_description:
             query_sales_db("/data/ticket-sales.db", "/data/ticket-sales-gold.txt")
             return jsonify(message="Ticket sales calculated successfully"), 200
+        elif "scrape website" in task_description:
+            url = task_description.split("url=")[1].strip()
+            scrape_website(url, "/data/scraped_data.txt")
+            return jsonify(message="Website scraped successfully"), 200
+        elif "resize image" in task_description:
+            resize_image("/data/input.jpg", "/data/resized.jpg")
+            return jsonify(message="Image resized successfully"), 200
+        elif "transcribe audio" in task_description:
+            transcribe_audio("/data/audio.mp3", "/data/transcribed.txt")
+            return jsonify(message="Audio transcribed successfully"), 200
+        elif "convert markdown to html" in task_description:
+            markdown_to_html("/data/input.md", "/data/output.html")
+            return jsonify(message="Markdown converted to HTML successfully"), 200
+        elif "filter CSV" in task_description:
+            filter_csv("/data/input.csv", "/data/output.json", "column_name", "value")
+            return jsonify(message="CSV filtered successfully"), 200
         else:
             return jsonify(message="Unknown task description"), 400
     except Exception as e:
         return jsonify(message=str(e)), 500
-
 
 @app.route('/read', methods=['GET'])
 def read_file():
@@ -200,7 +272,6 @@ def read_file():
             return jsonify(content=f.read()), 200
     else:
         return jsonify(message="File not found"), 404
-
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=8000)
